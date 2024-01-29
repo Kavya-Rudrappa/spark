@@ -1088,7 +1088,7 @@ private[sql] object UDFRegistration {
    * is transformed somehow for top-level row.
    */
   def outputSchema(outputEncoder: ExpressionEncoder[_]): ScalaReflection.Schema = {
-    ScalaReflection.Schema(outputEncoder.objSerializer.dataType,
-      outputEncoder.objSerializer.nullable)
+    ScalaReflection.Schema(outputEncoder.schema.head.dataType,
+      outputEncoder.schema.head.nullable)
   }
 }

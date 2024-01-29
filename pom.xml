@@ -301,6 +301,11 @@
       </snapshots>
     </repository>
     <repository>
+      <id>cerner-release-main</id>
+      <name>Cerner Release Repository</name>
+      <url>https://cernerrepos.net/maven</url>
+    </repository>
+    <repository>
       <!--
         This is used as a fallback when the first try fails.
       -->
@@ -525,6 +530,11 @@
             <artifactId>pmml-agent</artifactId>
           </exclusion>
         </exclusions>
+      </dependency>
+      <dependency>
+        <groupId>com.databricks</groupId>
+        <artifactId>spark-avro_${scala.binary.version}</artifactId>
+        <version>5.0.0</version>
       </dependency>
       <!-- End of shaded deps -->
 

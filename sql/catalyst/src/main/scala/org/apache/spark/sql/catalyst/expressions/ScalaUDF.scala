@@ -82,7 +82,7 @@ case class ScalaUDF(
       // It's possible that some of the inputs don't have a specific encoder(e.g. `Any`)
       if (encoderOpt.isDefined) {
         val encoder = encoderOpt.get
-        if (encoder.isSerializedAsStruct) {
+        if (encoder.flat) {
           // struct type is not primitive
           false
         } else {
@@ -106,7 +106,7 @@ case class ScalaUDF(
     inputEncoders.map { encoderOpt =>
       if (encoderOpt.isDefined) {
         val encoder = encoderOpt.get
-        if (encoder.isSerializedAsStruct) {
+        if (encoder.flat) {
           encoder.schema
         } else {
           encoder.schema.head.dataType
@@ -123,7 +123,7 @@ case class ScalaUDF(
    * converter for typed ScalaUDF only, since its the only case where we know the type tag
    * of the return data type of udf function.
    */
-  private def catalystConverter: Any => Any = outputEncoder.map { enc =>
+  private def catalystConverter: Any = outputEncoder.map { enc =>
     val toRow = enc.createSerializer().asInstanceOf[Any => Any]
     if (enc.isSerializedAsStructForTopLevel) {
       value: Any =>
@@ -157,7 +157,7 @@ case class ScalaUDF(
     if (useEncoder) {
       val enc = inputEncoders(i).get
       val fromRow = enc.createDeserializer()
-      val converter = if (enc.isSerializedAsStructForTopLevel) {
+      val converter = if (enc.flat) {
         row: Any => fromRow(row.asInstanceOf[InternalRow])
       } else {
         val inputRow = new GenericInternalRow(1)
@@ -1100,7 +1100,7 @@ case class ScalaUDF(
     val converterClassName = classOf[Any => Any].getName
 
     // The type converters for inputs and the result
-    val (converters, useEncoders): (Array[Any => Any], Array[Boolean]) =
+    val (converters, useEncoders): (Array[Any], Array[Boolean]) =
       (children.zipWithIndex.map { case (c, i) =>
         scalaConverter(i, c.dataType)
       }.toArray :+ (catalystConverter, false)).unzip
@@ -1196,7 +1196,7 @@ case class ScalaUDF(
           funcCls, inputTypesString, outputType, e)
     }
 
-    resultConverter(result)
+    resultConverter
   }
 
   override protected def withNewChildrenInternal(newChildren: IndexedSeq[Expression]): ScalaUDF =

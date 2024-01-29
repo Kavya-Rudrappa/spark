@@ -449,7 +449,7 @@ class ExpressionEncoderSuite extends CodegenInterpretedPlanTest with AnalysisTes
 
   test("nullable of encoder serializer") {
     def checkNullable[T: Encoder](nullable: Boolean): Unit = {
-      assert(encoderFor[T].objSerializer.nullable === nullable)
+      assert(encoderFor[T].serializer.forall(_.nullable === nullable))
     }
 
     // test for flat encoders

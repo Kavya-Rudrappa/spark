@@ -29,7 +29,7 @@ import com.google.common.reflect.TypeToken
 
 import org.apache.spark.sql.catalyst.DeserializerBuildHelper._
 import org.apache.spark.sql.catalyst.SerializerBuildHelper._
-import org.apache.spark.sql.catalyst.analysis.GetColumnByOrdinal
+import org.apache.spark.sql.catalyst.analysis.{GetColumnByOrdinal}
 import org.apache.spark.sql.catalyst.expressions._
 import org.apache.spark.sql.catalyst.expressions.objects._
 import org.apache.spark.sql.catalyst.util.ArrayBasedMapData
@@ -214,24 +214,33 @@ object JavaTypeInference {
    * 0 of a row, i.e., `GetColumnByOrdinal(0, _)`. Nested classes will have their fields accessed
    * using `UnresolvedExtractValue`.
    */
-  def deserializerFor(beanClass: Class[_]): Expression = {
-    val typeToken = TypeToken.of(beanClass)
-    val walkedTypePath = new WalkedTypePath().recordRoot(beanClass.getCanonicalName)
-    val (dataType, nullable) = inferDataType(typeToken)
+//  def deserializerFor(beanClass: Class[_]): Expression = {
+//    val typeToken = TypeToken.of(beanClass)
+//    val walkedTypePath = new WalkedTypePath().recordRoot(beanClass.getCanonicalName)
+//    val (dataType, nullable) = inferDataType(typeToken)
+//
+//    // Assumes we are deserializing the first column of a row.
+//    deserializerForWithNullSafetyAndUpcast(GetColumnByOrdinal(0, dataType), dataType,
+//      nullable = nullable, walkedTypePath, (casted, walkedTypePath) => {
+//        deserializerFor(typeToken, casted, walkedTypePath)
+//      })
+//  }
 
-    // Assumes we are deserializing the first column of a row.
-    deserializerForWithNullSafetyAndUpcast(GetColumnByOrdinal(0, dataType), dataType,
-      nullable = nullable, walkedTypePath, (casted, walkedTypePath) => {
-        deserializerFor(typeToken, casted, walkedTypePath)
-      })
-  }
+def deserializerFor(beanClass: Class[_]): Expression = {
+  val typeToken = TypeToken.of(beanClass)
+  val walkedTypePath = new WalkedTypePath().recordRoot(beanClass.getCanonicalName)
+  deserializerFor(typeToken, None, walkedTypePath)
+}
 
   private def deserializerFor(
       typeToken: TypeToken[_],
-      path: Expression,
+      path: Option[Expression],
       walkedTypePath: WalkedTypePath): Expression = {
+
+    def getPath: Expression = path.getOrElse(GetColumnByOrdinal(0, inferDataType(typeToken)._1))
+
     typeToken.getRawType match {
-      case c if !inferExternalType(c).isInstanceOf[ObjectType] => path
+      case c if !inferExternalType(c).isInstanceOf[ObjectType] => getPath
 
       case c if c == classOf[java.lang.Short] ||
                 c == classOf[java.lang.Integer] ||
@@ -240,38 +249,38 @@ object JavaTypeInference {
                 c == classOf[java.lang.Float] ||
                 c == classOf[java.lang.Byte] ||
                 c == classOf[java.lang.Boolean] =>
-        createDeserializerForTypesSupportValueOf(path, c)
+        createDeserializerForTypesSupportValueOf(getPath, c)
 
       case c if c == classOf[java.time.LocalDate] =>
-        createDeserializerForLocalDate(path)
+        createDeserializerForLocalDate(getPath)
 
       case c if c == classOf[java.sql.Date] =>
-        createDeserializerForSqlDate(path)
+        createDeserializerForSqlDate(getPath)
 
       case c if c == classOf[java.time.Instant] =>
-        createDeserializerForInstant(path)
+        createDeserializerForInstant(getPath)
 
       case c if c == classOf[java.sql.Timestamp] =>
-        createDeserializerForSqlTimestamp(path)
+        createDeserializerForSqlTimestamp(getPath)
 
       // SPARK-36227: Remove TimestampNTZ type support in Spark 3.2 with minimal code changes.
       case c if c == classOf[java.time.LocalDateTime] && Utils.isTesting =>
-        createDeserializerForLocalDateTime(path)
+        createDeserializerForLocalDateTime(getPath)
 
       case c if c == classOf[java.time.Duration] =>
-        createDeserializerForDuration(path)
+        createDeserializerForDuration(getPath)
 
       case c if c == classOf[java.time.Period] =>
-        createDeserializerForPeriod(path)
+        createDeserializerForPeriod(getPath)
 
       case c if c == classOf[java.lang.String] =>
-        createDeserializerForString(path, returnNullable = true)
+        createDeserializerForString(getPath, returnNullable = true)
 
       case c if c == classOf[java.math.BigDecimal] =>
-        createDeserializerForJavaBigDecimal(path, returnNullable = true)
+        createDeserializerForJavaBigDecimal(getPath, returnNullable = true)
 
       case c if c == classOf[java.math.BigInteger] =>
-        createDeserializerForJavaBigInteger(path, returnNullable = true)
+        createDeserializerForJavaBigInteger(getPath, returnNullable = true)
 
       case c if c.isArray =>
         val elementType = c.getComponentType
@@ -284,10 +293,11 @@ object JavaTypeInference {
             dataType,
             nullable = elementNullable,
             newTypePath,
-            (casted, typePath) => deserializerFor(typeToken.getComponentType, casted, typePath))
+            (casted, typePath) =>
+              deserializerFor(typeToken.getComponentType, Some(casted), typePath))
         }
 
-        val arrayData = UnresolvedMapObjects(mapFunction, path)
+        val arrayData = UnresolvedMapObjects(mapFunction, getPath)
 
         val methodName = elementType match {
           case c if c == java.lang.Integer.TYPE => "toIntArray"
@@ -313,10 +323,10 @@ object JavaTypeInference {
             dataType,
             nullable = elementNullable,
             newTypePath,
-            (casted, typePath) => deserializerFor(et, casted, typePath))
+            (casted, typePath) => deserializerFor(et, Some(casted), typePath))
         }
 
-        UnresolvedMapObjects(mapFunction, path, customCollectionCls = Some(c))
+        UnresolvedMapObjects(mapFunction, getPath, customCollectionCls = Some(c))
 
       case _ if ttIsAssignableFrom(mapType, typeToken) =>
         val (keyType, valueType) = mapKeyValueType(typeToken)
@@ -326,16 +336,16 @@ object JavaTypeInference {
         val keyData =
           Invoke(
             UnresolvedMapObjects(
-              p => deserializerFor(keyType, p, newTypePath),
-              MapKeys(path)),
+              p => deserializerFor(keyType, Some(p), newTypePath),
+              MapKeys(getPath)),
             "array",
             ObjectType(classOf[Array[Any]]))
 
         val valueData =
           Invoke(
             UnresolvedMapObjects(
-              p => deserializerFor(valueType, p, newTypePath),
-              MapValues(path)),
+              p => deserializerFor(valueType, Some(p), newTypePath),
+              MapValues(getPath)),
             "array",
             ObjectType(classOf[Array[Any]]))
 
@@ -348,7 +358,7 @@ object JavaTypeInference {
 
       case other if other.isEnum =>
         createDeserializerForTypesSupportValueOf(
-          createDeserializerForString(path, returnNullable = false),
+          createDeserializerForString(getPath, returnNullable = false),
           other)
 
       case other =>
@@ -361,7 +371,7 @@ object JavaTypeInference {
           // The existence of `javax.annotation.Nonnull`, means this field is not nullable.
           val hasNonNull = p.getReadMethod.isAnnotationPresent(classOf[Nonnull])
           val setter = expressionWithNullSafety(
-            deserializerFor(fieldType, addToPath(path, fieldName, dataType, newTypePath),
+            deserializerFor(fieldType, Some(addToPath(getPath, fieldName, dataType, newTypePath)),
               newTypePath),
             nullable = nullable && !hasNonNull,
             newTypePath)
@@ -372,7 +382,7 @@ object JavaTypeInference {
         val result = InitializeJavaBean(newInstance, setters)
 
         expressions.If(
-          IsNull(path),
+          IsNull(getPath),
           expressions.Literal.create(null, ObjectType(other)),
           result
         )

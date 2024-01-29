@@ -506,7 +506,7 @@ case class ScalaAggregator[IN, BUF, OUT](
   private[this] lazy val outputEncoder = agg.outputEncoder.asInstanceOf[ExpressionEncoder[OUT]]
   private[this] lazy val outputSerializer = outputEncoder.createSerializer()
 
-  def dataType: DataType = outputEncoder.objSerializer.dataType
+  def dataType: DataType = outputEncoder.schema.head.dataType
 
   def inputTypes: Seq[DataType] = inputEncoder.schema.map(_.dataType)
 
