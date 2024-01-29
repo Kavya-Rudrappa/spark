@@ -26,7 +26,9 @@ import java.util.*;
 import java.util.stream.Collectors;
 import javax.annotation.Nonnull;
 
+import org.apache.avro.specific.SpecificRecord;
 import org.apache.spark.api.java.Optional;
+import org.apache.spark.sql.catalyst.encoders.ExpressionEncoder;
 import org.apache.spark.sql.streaming.GroupStateTimeout;
 import org.apache.spark.sql.streaming.OutputMode;
 import scala.Tuple2;
@@ -51,6 +53,7 @@ import org.apache.spark.util.LongAccumulator;
 
 import static org.apache.spark.sql.functions.*;
 import static org.apache.spark.sql.types.DataTypes.*;
+import static test.org.apache.spark.sql.PopRecordEntity.ENCOUNTER;
 
 public class JavaDatasetSuite implements Serializable {
   private transient TestSparkSession spark;
@@ -535,6 +538,48 @@ public class JavaDatasetSuite implements Serializable {
     Assert.assertEquals(
       Arrays.asList(tuple2(2, 2), tuple2(3, 3)),
       joined.collectAsList());
+  }
+
+  @Test
+  public void testJoin_2() {
+
+    StructType schema = createStructType(Arrays.asList(
+            createStructField("name", StringType, false),
+            createStructField("salary", IntegerType, false)));
+
+    ExpressionEncoder<Row> encoder = ExpressionEncoder.apply(schema);
+
+    List<Row> rows = Arrays.asList(
+            RowFactory.create("Michael", 3000),
+            RowFactory.create("Andy", 4500),
+            RowFactory.create("Justin", 3500));
+    Dataset<Row> df = spark.createDataset(rows, encoder).as("a");
+    System.out.println("df ->" + df);
+
+    PopRecordDatasets poprecdataset = PopRecordDatasets.fromAvroDirectory(spark);
+
+    System.out.println("poprecdataset ->" + poprecdataset);
+
+//    List<Row> rows2 = Arrays.asList(
+//            RowFactory.create("Michael", 3000),
+//            RowFactory.create("Berta", 4000));
+
+// Dataset<SpecificRecord> ds = spark.read().json("src/test/resources/employees.json").as(employeeEncoder).as("b");
+
+//    Dataset<Row> df2 = spark.createDataset(rows2, encoder).as("b");
+//
+//    System.out.println("df2 ->" + df2);
+
+
+    Dataset<Tuple2<Row, SpecificRecord>> joined =
+            df.joinWith(poprecdataset.get(ENCOUNTER).as("b"), col("a.name").equalTo(col("b.name")), "left");
+
+
+//    Assert.assertEquals(
+//            Arrays.asList(
+//                    Arrays.asList(tuple2(1, "x"), tuple2(1, "x")),
+//                    Arrays.asList(tuple2(2, "y"), tuple2(2, "y"))),
+//            joined.collectAsList());
   }
 
   private static final Comparator<Tuple2<String, Integer>> comparatorStringAndIntTuple =
