@@ -229,7 +229,8 @@ object JavaTypeInference {
 def deserializerFor(beanClass: Class[_]): Expression = {
   val typeToken = TypeToken.of(beanClass)
   val walkedTypePath = new WalkedTypePath().recordRoot(beanClass.getCanonicalName)
-  deserializerFor(typeToken, None, walkedTypePath)
+ // deserializerFor(TypeToken.of(beanClass), None)
+   deserializerFor(typeToken, None, walkedTypePath)
 }
 
   private def deserializerFor(
@@ -380,12 +381,15 @@ def deserializerFor(beanClass: Class[_]): Expression = {
 
         val newInstance = NewInstance(other, Nil, ObjectType(other), propagateNull = false)
         val result = InitializeJavaBean(newInstance, setters)
-
-        expressions.If(
-          IsNull(getPath),
-          expressions.Literal.create(null, ObjectType(other)),
+        if (path.nonEmpty) {
+          expressions.If(
+            IsNull(getPath),
+            expressions.Literal.create(null, ObjectType(other)),
+            result
+          )
+        } else {
           result
-        )
+        }
     }
   }
 
@@ -394,10 +398,14 @@ def deserializerFor(beanClass: Class[_]): Expression = {
    * representation. The input object is located at ordinal 0 of a row, i.e.,
    * `BoundReference(0, _)`.
    */
-  def serializerFor(beanClass: Class[_]): Expression = {
+  def serializerFor(beanClass: Class[_]): CreateNamedStruct = {
     val inputObject = BoundReference(0, ObjectType(beanClass), nullable = true)
     val nullSafeInput = AssertNotNull(inputObject, Seq("top level input bean"))
-    serializerFor(nullSafeInput, TypeToken.of(beanClass))
+    // serializerFor(nullSafeInput, TypeToken.of(beanClass))
+    serializerFor(nullSafeInput, TypeToken.of(beanClass)) match {
+      case expressions.If(_, _, s: CreateNamedStruct) => s
+      case other => CreateNamedStruct(expressions.Literal("value") :: other :: Nil)
+    }
   }
 
   private def serializerFor(inputObject: Expression, typeToken: TypeToken[_]): Expression = {

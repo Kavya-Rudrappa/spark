@@ -3228,7 +3228,7 @@ class Analyzer(override val catalogManager: CatalogManager)
           val boundEncoders = udf.inputEncoders.zipWithIndex.map { case (encOpt, i) =>
             val dataType = udf.children(i).dataType
             encOpt.map { enc =>
-              val attrs = if (enc.flat) {
+              val attrs = if (enc.isSerializedAsStructForTopLevel) {
                 dataType.asInstanceOf[StructType].toAttributes
               } else {
                 // the field name doesn't matter here, so we use
