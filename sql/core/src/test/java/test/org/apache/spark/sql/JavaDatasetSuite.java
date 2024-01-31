@@ -463,7 +463,7 @@ public class JavaDatasetSuite implements Serializable {
 
     StructType schema = createStructType(Arrays.asList(
             createStructField("name", StringType, false),
-            createStructField("salary", IntegerType, false)));
+            createStructField("salary1", IntegerType, false)));
 
     ExpressionEncoder<Row> encoder = RowEncoder.apply(schema);
 
@@ -478,19 +478,19 @@ public class JavaDatasetSuite implements Serializable {
 
     System.out.println("poprecdataset ->" + poprecdataset);
 
-//    List<Row> rows2 = Arrays.asList(
-//            RowFactory.create("Michael", 3000),
-//            RowFactory.create("Berta", 4000));
+    List<Row> rows2 = Arrays.asList(
+            RowFactory.create("Michael", 3000),
+            RowFactory.create("Berta", 4000));
 
 // Dataset<SpecificRecord> ds = spark.read().json("src/test/resources/employees.json").as(employeeEncoder).as("b");
 
-//    Dataset<Row> df2 = spark.createDataset(rows2, encoder).as("b");
+    Dataset<Row> df2 = spark.createDataset(rows2, encoder).as("b");
 //
 //    System.out.println("df2 ->" + df2);
 
 
     Dataset<Tuple2<Row, SpecificRecord>> joined =
-            df.joinWith(poprecdataset.get(ENCOUNTER).as("b"), col("a.name").equalTo(col("b.name")), "left");
+            df.joinWith(poprecdataset.get(ENCOUNTER).as("b"), col("a.name").equalTo(col("b.name")));
 
 
 //    Assert.assertEquals(

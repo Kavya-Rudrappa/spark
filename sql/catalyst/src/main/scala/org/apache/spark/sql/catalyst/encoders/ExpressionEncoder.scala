@@ -18,8 +18,7 @@
 package org.apache.spark.sql.catalyst.encoders
 
 import scala.reflect.ClassTag
-import scala.reflect.runtime.universe.{typeTag, TypeTag}
-
+import scala.reflect.runtime.universe.{TypeTag, typeTag}
 import org.apache.spark.sql.Encoder
 import org.apache.spark.sql.catalyst.{InternalRow, JavaTypeInference, ScalaReflection}
 import org.apache.spark.sql.catalyst.analysis.{Analyzer, GetColumnByOrdinal, SimpleAnalyzer, UnresolvedAttribute, UnresolvedExtractValue}
@@ -30,7 +29,7 @@ import org.apache.spark.sql.catalyst.expressions.objects.{AssertNotNull, Initial
 import org.apache.spark.sql.catalyst.optimizer.{ReassignLambdaVariableID, SimplifyCasts}
 import org.apache.spark.sql.catalyst.plans.logical.{CatalystSerde, DeserializeToObject, LeafNode, LocalRelation}
 import org.apache.spark.sql.errors.QueryExecutionErrors
-import org.apache.spark.sql.types.{ObjectType, StringType, StructField, StructType}
+import org.apache.spark.sql.types._
 import org.apache.spark.unsafe.types.UTF8String
 import org.apache.spark.util.Utils
 
@@ -87,6 +86,11 @@ object ExpressionEncoder {
 
     encoders.foreach(_.assertUnresolved())
 
+    val schema = StructType(encoders.zipWithIndex.map {
+      case (e, i) =>
+        StructField(s"_${i + 1}", e.objSerializer.dataType, e.objSerializer.nullable)
+    })
+
     val cls = Utils.getContextOrSparkClassLoader.loadClass(s"scala.Tuple${encoders.size}")
 
     val newSerializerInput = BoundReference(0, ObjectType(cls), nullable = true)
@@ -111,17 +115,37 @@ object ExpressionEncoder {
     val newSerializer = CreateStruct(serializers)
 
     val newDeserializerInput = GetColumnByOrdinal(0, newSerializer.dataType)
-    val deserializers = encoders.zipWithIndex.map { case (enc, index) =>
-      val getColExprs = enc.objDeserializer.collect { case c: GetColumnByOrdinal => c }.distinct
-      assert(getColExprs.size == 1, "object deserializer should have only one " +
-        s"`GetColumnByOrdinal`, but there are ${getColExprs.size}")
 
-      val input = GetStructField(newDeserializerInput, index)
-      enc.objDeserializer.transformUp {
-        case GetColumnByOrdinal(0, _) => input
+//    val deserializers = encoders.zipWithIndex.map { case (enc, index) =>
+//      val getColExprs = enc.objDeserializer.collect { case c: GetColumnByOrdinal => c }.distinct
+//      assert(getColExprs.size == 1, "object deserializer should have only one " +
+//        s"`GetColumnByOrdinal`, but there are ${getColExprs.size}")
+//
+//      val input = GetStructField(newDeserializerInput, index)
+//      enc.objDeserializer.transformUp {
+//        case GetColumnByOrdinal(0, _) => input
+//      }
+//    }
+
+    val childrenDeserializers = encoders.zipWithIndex.map { case (enc, index) =>
+      if (!enc.isSerializedAsStructForTopLevel) {
+        enc.objDeserializer.transform {
+          case g: GetColumnByOrdinal => g.copy(ordinal = index)
+        }
+      }else {
+        val input = GetColumnByOrdinal(index, enc.schema)
+        val deserialized = enc.objDeserializer.transformUp {
+          case UnresolvedAttribute(nameParts) =>
+            assert(nameParts.length == 1)
+            UnresolvedExtractValue(input, Literal(nameParts.head))
+          case GetColumnByOrdinal(ordinal, _) => GetStructField(input, ordinal)
+        }
+        If(IsNull(input), Literal.create(null, deserialized.dataType), deserialized)
       }
     }
-    val newDeserializer = NewInstance(cls, deserializers, ObjectType(cls), propagateNull = false)
+
+
+    val newDeserializer = NewInstance(cls, childrenDeserializers, ObjectType(cls), propagateNull = false)
 
     def nullSafe(input: Expression, result: Expression): Expression = {
       If(IsNull(input), Literal.create(null, result.dataType), result)
