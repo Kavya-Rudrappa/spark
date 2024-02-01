@@ -572,7 +572,7 @@ public class JavaDatasetSuite implements Serializable {
 
 
     Dataset<Tuple2<Row, SpecificRecord>> joined =
-            df.joinWith(poprecdataset.get(ENCOUNTER).as("b"), col("a.name").equalTo(col("b.name")), "left");
+            df.joinWith(poprecdataset.get(ENCOUNTER).as("b"), col("a.name").equalTo(col("b.name")));
 
 
 //    Assert.assertEquals(

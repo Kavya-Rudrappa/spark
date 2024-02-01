@@ -109,24 +109,45 @@ object ExpressionEncoder {
     }
 
     val newDeserializerInput = GetColumnByOrdinal(0, newSerializer.dataType)
+//    val childrenDeserializers = encoders.zipWithIndex.map { case (enc, index) =>
+//      val getColExprs = enc.objDeserializer.collect { case c: GetColumnByOrdinal => c }.distinct
+//      assert(getColExprs.size == 1, "object deserializer should have only one " +
+//        s"`GetColumnByOrdinal`, but there are ${getColExprs.size}")
+//
+//      val input = GetStructField(newDeserializerInput, index)
+//      val childDeserializer = enc.objDeserializer.transformUp {
+//        case GetColumnByOrdinal(0, _) => input
+//      }
+//
+//      if (enc.objSerializer.nullable) {
+//        nullSafe(input, childDeserializer)
+//      } else {
+//        childDeserializer
+//      }
+//    }
+//    val newDeserializer =
+//      NewInstance(cls, childrenDeserializers, ObjectType(cls), propagateNull = false)
+
     val childrenDeserializers = encoders.zipWithIndex.map { case (enc, index) =>
-      val getColExprs = enc.objDeserializer.collect { case c: GetColumnByOrdinal => c }.distinct
-      assert(getColExprs.size == 1, "object deserializer should have only one " +
-        s"`GetColumnByOrdinal`, but there are ${getColExprs.size}")
-
-      val input = GetStructField(newDeserializerInput, index)
-      val childDeserializer = enc.objDeserializer.transformUp {
-        case GetColumnByOrdinal(0, _) => input
-      }
-
-      if (enc.objSerializer.nullable) {
-        nullSafe(input, childDeserializer)
-      } else {
-        childDeserializer
+      if (!enc.isSerializedAsStructForTopLevel) {
+        enc.objDeserializer.transform {
+          case g: GetColumnByOrdinal => g.copy(ordinal = index)
+        }
+      }else {
+        val input = GetColumnByOrdinal(index, enc.schema)
+        val deserialized = enc.objDeserializer.transformUp {
+          case UnresolvedAttribute(nameParts) =>
+            assert(nameParts.length == 1)
+            UnresolvedExtractValue(input, Literal(nameParts.head))
+          case GetColumnByOrdinal(ordinal, _) => GetStructField(input, ordinal)
+        }
+        If(IsNull(input), Literal.create(null, deserialized.dataType), deserialized)
       }
     }
-    val newDeserializer =
-      NewInstance(cls, childrenDeserializers, ObjectType(cls), propagateNull = false)
+
+
+    val newDeserializer = NewInstance(cls, childrenDeserializers, ObjectType(cls), propagateNull = false)
+
 
     new ExpressionEncoder[Any](
       nullSafe(newSerializerInput, newSerializer),
